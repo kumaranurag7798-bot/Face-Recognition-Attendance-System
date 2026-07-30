@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+dataset/
+trainer/
+attendance/attendance.csv
+.vscode/
