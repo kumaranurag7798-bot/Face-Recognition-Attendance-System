@@ -3,117 +3,97 @@ import cv2
 import os
 import numpy as np
 import pandas as pd
-import pickle
 from datetime import datetime
 
 st.set_page_config(page_title="Face Recognition Attendance System", page_icon="🎯")
 
-face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-
 st.title("🎯 Face Recognition Attendance System")
-st.caption("AI-powered attendance system using Python, OpenCV and LBPH")
+st.caption("AI-powered attendance system using Python, OpenCV and Deep Learning (YuNet + SFace)")
+
+# Load Deep Learning models once
+detector = cv2.FaceDetectorYN.create("face_detection_yunet.onnx", "", (320, 320), score_threshold=0.6)
+recognizer = cv2.FaceRecognizerSF.create("face_recognition_sface.onnx", "")
+
+MATCH_THRESHOLD = 0.90
 
 # ---------------------------------------------------
-# SECTION 1: REGISTER NEW PERSON
+# SECTION 1: REGISTER NEW PERSON (Deep Learning - SFace)
 # ---------------------------------------------------
 st.divider()
-st.subheader("📸 Register New Person")
+st.subheader("📸 Register New Person (Deep Learning)")
 
 person_name = st.text_input("Enter person's name")
-start_capture = st.button("Start Capturing 30 Photos")
+start_capture = st.button("Start Capturing (15 frames)")
 
 if start_capture:
     if person_name.strip() == "":
         st.warning("Pehle naam daalo!")
     else:
-        save_path = f"dataset/{person_name}"
-        os.makedirs(save_path, exist_ok=True)
+        os.makedirs("embeddings", exist_ok=True)
 
         cap = cv2.VideoCapture(0)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        detector.setInputSize((w, h))
+
         frame_placeholder = st.empty()
         progress_bar = st.progress(0)
-        count = 0
+        collected_features = []
 
-        while count < 30:
+        while len(collected_features) < 15:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            _, faces = detector.detect(frame)
 
-            for (x, y, w, h) in faces:
-                count += 1
-                face_img = gray[y:y+h, x:x+w]
-                cv2.imwrite(f"{save_path}/{count}.jpg", face_img)
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.putText(frame, f"{count}/30", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            if faces is not None and len(faces) > 0:
+                face = faces[0]
+                x, y, w_box, h_box = face[0:4].astype(int)
+
+                aligned_face = recognizer.alignCrop(frame, face)
+                feature = recognizer.feature(aligned_face)
+                collected_features.append(feature)
+
+                cv2.rectangle(frame, (x, y), (x + w_box, y + h_box), (0, 255, 0), 2)
+                cv2.putText(frame, f"{len(collected_features)}/15", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             frame_placeholder.image(frame, channels="BGR")
-            progress_bar.progress(min(count / 30, 1.0))
-
-            if count >= 30:
-                break
+            progress_bar.progress(min(len(collected_features) / 15, 1.0))
 
         cap.release()
-        st.success(f"✅ {count} photos captured for {person_name}!")
+
+        avg_embedding = np.mean(collected_features, axis=0)
+        np.save(f"embeddings/{person_name}.npy", avg_embedding)
+
+        st.success(f"✅ {person_name} registered successfully with Deep Learning embeddings!")
 
 # ---------------------------------------------------
-# SECTION 2: TRAIN MODEL
-# ---------------------------------------------------
-st.divider()
-st.subheader("🧠 Train the Recognition Model")
-st.write("Ye saare registered logon ke data pe model train karega.")
-
-if st.button("Train Now"):
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    dataset_path = 'dataset'
-    faces, labels, label_names = [], [], {}
-    current_label = 0
-
-    if not os.path.exists(dataset_path) or len(os.listdir(dataset_path)) == 0:
-        st.error("Dataset khali hai! Pehle upar se log register karo.")
-    else:
-        for person_name in os.listdir(dataset_path):
-            person_path = os.path.join(dataset_path, person_name)
-            if not os.path.isdir(person_path):
-                continue
-            label_names[current_label] = person_name
-            for image_name in os.listdir(person_path):
-                img = cv2.imread(os.path.join(person_path, image_name), cv2.IMREAD_GRAYSCALE)
-                if img is None:
-                    continue
-                faces.append(img)
-                labels.append(current_label)
-            current_label += 1
-
-        recognizer.train(faces, np.array(labels))
-        os.makedirs('trainer', exist_ok=True)
-        recognizer.save('trainer/trainer.yml')
-
-        with open('trainer/labels.pickle', 'wb') as f:
-            pickle.dump(label_names, f)
-
-        st.success(f"✅ Model trained on {len(faces)} images for {len(label_names)} person(s): {', '.join(label_names.values())}")
-
-# ---------------------------------------------------
-# SECTION 3: MARK ATTENDANCE
+# SECTION 2: INFO (No training needed with Deep Learning)
 # ---------------------------------------------------
 st.divider()
-st.subheader("✅ Mark Attendance (Live Recognition)")
+st.info("ℹ️ Deep Learning approach mein alag se 'training' ki zarurat nahi — har naya person register karte hi uska embedding ready ho jata hai!")
 
-if not os.path.exists('trainer/trainer.yml'):
-    st.warning("Pehle upar se model train karo.")
+# ---------------------------------------------------
+# SECTION 3: MARK ATTENDANCE (Deep Learning - SFace)
+# ---------------------------------------------------
+st.divider()
+st.subheader("✅ Mark Attendance (Deep Learning)")
+
+if not os.path.exists("embeddings") or len(os.listdir("embeddings")) == 0:
+    st.warning("Pehle upar se kam se kam ek person register karo.")
 else:
     duration = st.slider("Kitni der camera chalu rahe (seconds)", 5, 30, 15)
     start_attendance = st.button("Start Recognition")
 
     if start_attendance:
-        recognizer = cv2.face.LBPHFaceRecognizer_create()
-        recognizer.read('trainer/trainer.yml')
-
-        with open('trainer/labels.pickle', 'rb') as f:
-            label_names = pickle.load(f)
+        # Saare saved embeddings load karo
+        known_embeddings = {}
+        for file_name in os.listdir("embeddings"):
+            if file_name.endswith(".npy"):
+                p_name = file_name.replace(".npy", "")
+                known_embeddings[p_name] = np.load(f"embeddings/{file_name}")
 
         os.makedirs('attendance', exist_ok=True)
         attendance_file = 'attendance/attendance.csv'
@@ -125,10 +105,13 @@ else:
         marked_today = set(existing_df[existing_df['Date'] == today_date]['Name'])
 
         cap = cv2.VideoCapture(0)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        detector.setInputSize((w, h))
+
         frame_placeholder = st.empty()
         status_placeholder = st.empty()
         start_time = datetime.now()
-
         new_entries = []
 
         while (datetime.now() - start_time).seconds < duration:
@@ -136,27 +119,39 @@ else:
             if not ret:
                 break
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            _, faces = detector.detect(frame)
 
-            for (x, y, w, h) in faces:
-                face_img = gray[y:y+h, x:x+w]
-                label, confidence = recognizer.predict(face_img)
+            if faces is not None and len(faces) > 0:
+                for face in faces:
+                    x, y, w_box, h_box = face[0:4].astype(int)
 
-                if confidence < 70:
-                    name = label_names.get(label, "Unknown")
-                    color = (0, 255, 0)
-                    if name not in marked_today:
-                        now = datetime.now()
-                        new_entries.append([name, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')])
-                        marked_today.add(name)
-                        status_placeholder.success(f"Attendance marked: {name}")
-                else:
-                    name = "Unknown"
-                    color = (0, 0, 255)
+                    aligned_face = recognizer.alignCrop(frame, face)
+                    current_feature = recognizer.feature(aligned_face)
 
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                cv2.putText(frame, name, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    best_match_name = "Unknown"
+                    best_score = 0
+
+                    for p_name, ref_embedding in known_embeddings.items():
+                        score = recognizer.match(ref_embedding, current_feature, cv2.FaceRecognizerSF_FR_COSINE)
+                        if score > best_score:
+                            best_score = score
+                            best_match_name = p_name
+
+                    if best_score >= MATCH_THRESHOLD:
+                        name = best_match_name
+                        color = (0, 255, 0)
+                        if name not in marked_today:
+                            now = datetime.now()
+                            new_entries.append([name, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')])
+                            marked_today.add(name)
+                            status_placeholder.success(f"Attendance marked: {name} (score: {best_score:.2f})")
+                    else:
+                        name = "Unknown"
+                        color = (0, 0, 255)
+
+                    cv2.rectangle(frame, (x, y), (x + w_box, y + h_box), color, 2)
+                    cv2.putText(frame, f"{name} ({best_score:.2f})", (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
             frame_placeholder.image(frame, channels="BGR")
 

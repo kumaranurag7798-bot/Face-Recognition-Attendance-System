@@ -5,3 +5,4 @@ dataset/
 trainer/
 attendance/attendance.csv
 .vscode/
+embeddings/
