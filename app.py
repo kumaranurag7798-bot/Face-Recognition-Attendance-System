@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from collections import deque
 
 st.set_page_config(page_title="Face Recognition Attendance System", page_icon="🎯")
 
@@ -14,7 +15,7 @@ st.caption("AI-powered attendance system using Python, OpenCV and Deep Learning 
 detector = cv2.FaceDetectorYN.create("face_detection_yunet.onnx", "", (320, 320), score_threshold=0.6)
 recognizer = cv2.FaceRecognizerSF.create("face_recognition_sface.onnx", "")
 
-MATCH_THRESHOLD = 0.90
+MATCH_THRESHOLD = 0.75
 
 # ---------------------------------------------------
 # SECTION 1: REGISTER NEW PERSON (Deep Learning - SFace)
@@ -48,7 +49,8 @@ if start_capture:
             _, faces = detector.detect(frame)
 
             if faces is not None and len(faces) > 0:
-                face = faces[0]
+                # Sirf sabse bada face lo (registration ke waqt bhi false detections se bachne ke liye)
+                face = max(faces, key=lambda f: f[2] * f[3])
                 x, y, w_box, h_box = face[0:4].astype(int)
 
                 aligned_face = recognizer.alignCrop(frame, face)
@@ -76,7 +78,7 @@ st.divider()
 st.info("ℹ️ Deep Learning approach mein alag se 'training' ki zarurat nahi — har naya person register karte hi uska embedding ready ho jata hai!")
 
 # ---------------------------------------------------
-# SECTION 3: MARK ATTENDANCE (Deep Learning - SFace)
+# SECTION 3: MARK ATTENDANCE (Deep Learning - SFace + Rolling Average, single-face fix)
 # ---------------------------------------------------
 st.divider()
 st.subheader("✅ Mark Attendance (Deep Learning)")
@@ -94,6 +96,9 @@ else:
             if file_name.endswith(".npy"):
                 p_name = file_name.replace(".npy", "")
                 known_embeddings[p_name] = np.load(f"embeddings/{file_name}")
+
+        # Har person ke liye last 5 frames ke score store karne ke liye
+        score_history = {p_name: deque(maxlen=5) for p_name in known_embeddings.keys()}
 
         os.makedirs('attendance', exist_ok=True)
         attendance_file = 'attendance/attendance.csv'
@@ -122,36 +127,46 @@ else:
             _, faces = detector.detect(frame)
 
             if faces is not None and len(faces) > 0:
-                for face in faces:
-                    x, y, w_box, h_box = face[0:4].astype(int)
+                # FIX: Sirf sabse bada detected face process karo (real face),
+                # taaki chhoti galat detections (products, wallpaper, etc.) score history mein mix na ho
+                face = max(faces, key=lambda f: f[2] * f[3])
+                x, y, w_box, h_box = face[0:4].astype(int)
 
-                    aligned_face = recognizer.alignCrop(frame, face)
-                    current_feature = recognizer.feature(aligned_face)
+                aligned_face = recognizer.alignCrop(frame, face)
+                current_feature = recognizer.feature(aligned_face)
 
-                    best_match_name = "Unknown"
-                    best_score = 0
+                # Is frame mein har known person ke saath score nikalo aur history mein daalo
+                for p_name, ref_embedding in known_embeddings.items():
+                    score = recognizer.match(ref_embedding, current_feature, cv2.FaceRecognizerSF_FR_COSINE)
+                    score_history[p_name].append(score)
 
-                    for p_name, ref_embedding in known_embeddings.items():
-                        score = recognizer.match(ref_embedding, current_feature, cv2.FaceRecognizerSF_FR_COSINE)
-                        if score > best_score:
-                            best_score = score
-                            best_match_name = p_name
+                # Ab har person ka rolling average nikalo (jitne frames abhi tak collect hue)
+                best_match_name = "Unknown"
+                best_avg_score = 0
 
-                    if best_score >= MATCH_THRESHOLD:
-                        name = best_match_name
-                        color = (0, 255, 0)
-                        if name not in marked_today:
-                            now = datetime.now()
-                            new_entries.append([name, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')])
-                            marked_today.add(name)
-                            status_placeholder.success(f"Attendance marked: {name} (score: {best_score:.2f})")
-                    else:
-                        name = "Unknown"
-                        color = (0, 0, 255)
+                for p_name, history in score_history.items():
+                    if len(history) == 0:
+                        continue
+                    avg_score = sum(history) / len(history)
+                    if avg_score > best_avg_score:
+                        best_avg_score = avg_score
+                        best_match_name = p_name
 
-                    cv2.rectangle(frame, (x, y), (x + w_box, y + h_box), color, 2)
-                    cv2.putText(frame, f"{name} ({best_score:.2f})", (x, y - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                if best_avg_score >= MATCH_THRESHOLD:
+                    name = best_match_name
+                    color = (0, 255, 0)
+                    if name not in marked_today:
+                        now = datetime.now()
+                        new_entries.append([name, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')])
+                        marked_today.add(name)
+                        status_placeholder.success(f"Attendance marked: {name} (avg score: {best_avg_score:.2f})")
+                else:
+                    name = "Unknown"
+                    color = (0, 0, 255)
+
+                cv2.rectangle(frame, (x, y), (x + w_box, y + h_box), color, 2)
+                cv2.putText(frame, f"{name} ({best_avg_score:.2f})", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
             frame_placeholder.image(frame, channels="BGR")
 
