@@ -204,16 +204,38 @@ else:
         st.info("Session khatam ho gaya.")
 
 # ---------------------------------------------------
-# SECTION 4: SHOW ATTENDANCE RECORDS
+# SECTION 4: SHOW ATTENDANCE RECORDS (with Search + Date Filter)
 # ---------------------------------------------------
 st.divider()
 st.subheader("📋 Attendance Records")
 
 if os.path.exists('attendance/attendance.csv'):
     df = pd.read_csv('attendance/attendance.csv')
+
+    # ---- Search & Date Filter ----
+    filter_col1, filter_col2 = st.columns(2)
+
+    with filter_col1:
+        search_name = st.text_input("🔍 Search by name")
+
+    with filter_col2:
+        unique_dates = ["All Dates"] + sorted(df["Date"].unique().tolist(), reverse=True)
+        selected_date = st.selectbox("📅 Filter by date", unique_dates)
+
+    filtered_df = df.copy()
+
+    if search_name.strip() != "":
+        filtered_df = filtered_df[filtered_df["Name"].str.contains(search_name, case=False, na=False)]
+
+    if selected_date != "All Dates":
+        filtered_df = filtered_df[filtered_df["Date"] == selected_date]
+
+    df = filtered_df  # ab niche CSV/Excel download bhi isी filtered data ka hoga
+    # ---- End Filter ----
+
     st.dataframe(df, use_container_width=True)
 
-    # CSV download (existing)
+    # CSV download (filtered data)
     st.download_button(
         "Download CSV",
         df.to_csv(index=False),
@@ -221,7 +243,7 @@ if os.path.exists('attendance/attendance.csv'):
         "text/csv"
     )
 
-    # Excel (.xlsx) download (new)
+    # Excel (.xlsx) download (filtered data)
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Attendance")
