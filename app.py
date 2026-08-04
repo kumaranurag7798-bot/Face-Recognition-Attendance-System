@@ -18,6 +18,30 @@ recognizer = cv2.FaceRecognizerSF.create("face_recognition_sface.onnx", "")
 MATCH_THRESHOLD = 0.75
 
 # ---------------------------------------------------
+# DASHBOARD (Quick Stats)
+# ---------------------------------------------------
+st.divider()
+
+total_registered = 0
+if os.path.exists("embeddings"):
+    total_registered = len([f for f in os.listdir("embeddings") if f.endswith(".npy")])
+
+present_today = 0
+today_date_str = datetime.now().strftime('%Y-%m-%d')
+if os.path.exists("attendance/attendance.csv"):
+    att_df = pd.read_csv("attendance/attendance.csv")
+    present_today = len(att_df[att_df["Date"] == today_date_str]["Name"].unique())
+
+attendance_percentage = 0
+if total_registered > 0:
+    attendance_percentage = round((present_today / total_registered) * 100, 1)
+
+col1, col2, col3 = st.columns(3)
+col1.metric("👥 Total Registered Users", total_registered)
+col2.metric("✅ Present Today", present_today)
+col3.metric("📊 Attendance %", f"{attendance_percentage}%")
+
+# ---------------------------------------------------
 # SECTION 1: REGISTER NEW PERSON (Deep Learning - SFace)
 # ---------------------------------------------------
 st.divider()
@@ -127,7 +151,7 @@ else:
             _, faces = detector.detect(frame)
 
             if faces is not None and len(faces) > 0:
-                # FIX: Sirf sabse bada detected face process karo (real face),
+                # Sirf sabse bada detected face process karo (real face),
                 # taaki chhoti galat detections (products, wallpaper, etc.) score history mein mix na ho
                 face = max(faces, key=lambda f: f[2] * f[3])
                 x, y, w_box, h_box = face[0:4].astype(int)
