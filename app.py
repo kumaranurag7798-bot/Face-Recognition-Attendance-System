@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from collections import deque
+from io import BytesIO
 
 st.set_page_config(page_title="Face Recognition Attendance System", page_icon="🎯")
 
@@ -211,6 +212,26 @@ st.subheader("📋 Attendance Records")
 if os.path.exists('attendance/attendance.csv'):
     df = pd.read_csv('attendance/attendance.csv')
     st.dataframe(df, use_container_width=True)
-    st.download_button("Download CSV", df.to_csv(index=False), "attendance.csv", "text/csv")
+
+    # CSV download (existing)
+    st.download_button(
+        "Download CSV",
+        df.to_csv(index=False),
+        "attendance.csv",
+        "text/csv"
+    )
+
+    # Excel (.xlsx) download (new)
+    excel_buffer = BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Attendance")
+    excel_buffer.seek(0)
+
+    st.download_button(
+        "Download Excel (.xlsx)",
+        excel_buffer,
+        "attendance.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 else:
     st.write("Abhi tak koi attendance record nahi hai.")
